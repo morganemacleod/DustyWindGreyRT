@@ -3,7 +3,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
 import dusty_wind_utils as dw
-from dusty_wind_constants import *
+
+c=Constants()
+
+# Quadratic LD coeff V band http://cdsarc.u-strasbg.fr/viz-bin/qcat?J/A+A/554/A98#/browse
+# http://cdsarc.u-strasbg.fr/ftp/J/A+A/554/A98/ReadMe
+# USING TABLE 3,
+#   3600  -0.25   10.0   1.4631  -0.3821   1.3159  -0.2080   1.1055   0.0242   0.7179   0.4584   0.3054   0.9619   0.0813   1.2058   0.9838   0.1613   1.0586   0.0765
+ld1 = 1.3159
+ld2 = -0.2080
 
 
 def I(mu, ld1, ld2):
