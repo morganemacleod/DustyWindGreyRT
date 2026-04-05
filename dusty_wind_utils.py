@@ -105,7 +105,7 @@ def read_data_for_rt(fn,orb,rsoft2=0.1,level=0,
 
 
     ## FILL IN:
-    d['kappa'] = np.ones_like(d['rho'])
+    d['kappa'] = 1e-3*np.ones_like(d['rho'])
     
     return d
 
@@ -166,59 +166,54 @@ def cart_to_polar(x,y,z):
     phi=np.where(np.arctan2(y,x)<0,np.arctan2(y,x) + 2.0*np.pi, np.arctan2(y,x) )
     return phi,th,r
 
+def polar_to_cart(ph,th,r):
+    x = r * np.sin(th) * np.cos(ph) 
+    y = r * np.sin(th) * np.sin(ph) 
+    z = r * np.cos(th)
+    return x,y,z
 
-def get_ray(planet_pos, ydart, zdart, azim_angle, pol_angle, rstar, fstep, inner_lim, outer_lim):
 
+def get_ray(planet_pos, ydart, zdart, azim_angle, rstar, inner_lim, outer_lim, N_raypoints):
+
+    pol_angle = 0.0
     #print("get ray called with the following params:\n",
     #          "y =",ydart, " z=", zdart,"\n",
     #          "az_angle =",azim_angle,"pol_angle=",pol_angle,"\n",
-    #          "rstar =",rstar,"rplanet=",rplanet,"fstep =",fstep,"\n",
-    #          "inner_lim=",inner_lim,"outer_lim=",outer_lim)
+    #          "rstar =",rstar,"inner_lim=",inner_lim,"outer_lim=",outer_lim)
 
-    xdart = np.sign(planet_pos[0])*np.sqrt(1.0 - ydart*ydart - zdart*zdart)
-    dart1 = np.array([xdart*np.sign(planet_pos[0]), ydart, zdart])*rstar
+    xdart = np.sqrt(1.0 - ydart**2 - zdart**2)
+    origin = np.array([xdart, ydart, zdart])*rstar
     
-    rotz = np.array([[np.cos(-1.0*azim_angle),-np.sin(-1.0*azim_angle),0.0],
-                     [np.sin(-1.0*azim_angle),np.cos(-1.0*azim_angle),0.0],
+    rotZ = np.array([[np.cos(-azim_angle),-np.sin(-azim_angle),0.0],
+                     [np.sin(-azim_angle),np.cos(-azim_angle),0.0],
                      [0.0,0.0,1.0]])
-    rotY = np.array([[np.cos(-pol_angle),0.0,np.sin(-pol_angle)],
-                     [0.0,1.0,0.0],
-                     [-np.sin(-pol_angle),0.0,np.cos(-pol_angle)]])     
-
+    
 
     # define origin
-    #print(" ... ray rotation, az,pol: ", azim_angle, pol_angle)
-    origin = np.matmul( dart1, rotz)
-    origin = np.matmul( origin, rotY)
-    #print(" ... ray origin = ", origin)
-   
+
+    origin = np.matmul( origin, rotZ)
+    #print(" ... ray origin (x,y,z) = ", origin)
+    #print(" ... ray origin (ph,th,r)=", cart_to_polar(origin[0],origin[1],origin[2]))
+    
+    
     # ray 
     ray={}
- 
-    points = [inner_lim - rstar]
-    while(points[-1] < (outer_lim-rstar)):
-        x = points[-1]*np.cos(azim_angle)*np.cos(pol_angle) + origin[0]
-        y = points[-1]*np.sin(azim_angle)*np.cos(pol_angle) + origin[1]
-        z = points[-1]*np.sin(pol_angle) + origin[2]
-        dpl = np.sqrt((x-planet_pos[0])**2 + (y-planet_pos[1])**2 + (z-planet_pos[2])**2 )
-        points.append(points[-1] + fstep*dpl)
-        
 
-    points = np.array(points)
-    #print("points array goes from/to:",points[0],points[-1])
-    points = points[points<outer_lim] # safety check that we didn't overstep!
-    #print("points array goes from/to:",points[0],points[-1])
-    
+    #points = np.logspace(np.log10(inner_lim),np.log10(outer_lim),N_raypoints)-rstar
+    points = np.linspace(inner_lim,outer_lim,N_raypoints) - rstar
     ray['dl'] = points[1:]-points[0:-1]
     ray['l'] = 0.5*(points[1:]+points[0:-1])
+    #print(' ... points:',points,'\nl:',ray['l'])
     ray['x'] = ray['l']*np.cos(azim_angle)*np.cos(pol_angle) + origin[0] 
     ray['y'] = ray['l']*np.sin(azim_angle)*np.cos(pol_angle) + origin[1]
     ray['z'] = ray['l']*np.sin(pol_angle) + origin[2]
-    #print (ray['x'],ray['y'],ray['l'],ray['dl'])
     #print("ray faces = ",points)
+   
+    
     
     # spherical polar
     ray['phi'],ray['theta'],ray['r'] = cart_to_polar(ray['x'],ray['y'],ray['z'])
+    #print (" ... ray:\n","x:",ray['x'],"\ny:",ray['y'],"\nz:",ray['z'],"\nr:",ray['r'] )
 
     #print(" ... ray has l=",ray['l'][0],ray['l'][-1])
     #print(" ... ray has ",len(ray['r']),"points, between r=",ray['r'][0],ray['r'][-1], " th/pi=",ray['theta'][0]/np.pi,ray['theta'][-1]/np.pi, " phi/pi=",ray['phi'][0]/np.pi,ray['phi'][-1]/np.pi )

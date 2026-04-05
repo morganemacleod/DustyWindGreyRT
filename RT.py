@@ -31,6 +31,14 @@ def New_get_interp_function(d, var):
         (x3v, d['x2v'], d['x1v']), var_data, bounds_error=True)
     return var_interp
 
+def generate_uniform(N_diameter):
+    y = np.linspace(-1,1,N_diameter)
+    z = np.linspace(-1,1,N_diameter)
+    yy,zz = np.meshgrid(y,z)
+    y_circle = yy[yy**2 + zz**2 < 1].copy()
+    z_circle = zz[yy**2 + zz**2 < 1].copy()
+    return y_circle, z_circle
+    
 
 def generate_random(N_mc):
     theta = 2 * np.pi * np.random.random_sample(N_mc)
@@ -40,44 +48,6 @@ def generate_random(N_mc):
     zrandom = r * np.sin(theta)
 
     return yrandom, zrandom
-
-
-def generate_rays_weighted(Nr, slope, yp, zp, rad_planet_frac):
-    """Nr is the number of radius bins from the planet, slope is the power law sampling (1=linear, <1 is centrally concentrated)"""
-    # rf = np.logspace(np.log10(rad_planet_frac),np.log10(1+np.sqrt(yp**2 + zp**2)),Nr) # faces of the rings
-    rf = np.linspace(rad_planet_frac ** slope, (1 + np.sqrt(yp ** 2 + zp ** 2)) ** slope, Nr) ** (1 / slope)
-    ra = (2 / 3) * (rf[1:] ** 3 - rf[0:-1] ** 3) / (rf[1:] ** 2 - rf[0:-1] ** 2)  ## Area weighted centers
-    dr = rf[1:] - rf[0:-1]
-
-    rr = []
-    tt = []
-    da = []
-    for i in range(len(ra)):
-        Nth = int(np.round(2 * np.pi * ra[i] / dr[i]))
-        th = np.linspace(0, 2 * np.pi, Nth + 1)
-        th = 0.5 * (th[1:] + th[0:-1])
-        dth = th[1] - th[0]
-        for j in range(Nth):
-            rr.append(ra[i])
-            tt.append(th[j])
-            da.append(np.pi * (rf[i + 1] ** 2 - rf[i] ** 2) / Nth)
-
-    rr = np.array(rr).flatten()
-    tt = np.array(tt).flatten()
-    da = np.array(da).flatten()
-
-    yrays = yp + rr * np.cos(tt)
-    zrays = zp + rr * np.sin(tt)
-
-    sel = np.sqrt(yrays ** 2 + zrays ** 2) < 1.0
-    yrays = yrays[sel].copy()
-    zrays = zrays[sel].copy()
-    da = da[sel].copy()
-    print("selected N=", len(yrays), "rays")
-
-    return yrays, zrays, da
-
-
 
 
 
@@ -90,11 +60,11 @@ def MC_ray(dart):
                      ydart=ydart,
                      zdart=zdart,
                      azim_angle=azim_angle,
-                     pol_angle=pol_angle, 
+                     #pol_angle=pol_angle, 
                      rstar=rad_star,
-                     fstep=f_raystep,
                      inner_lim=in_lim,
-                     outer_lim=out_lim)
+                     outer_lim=out_lim,
+                     N_raypoints=N_raypoints)
 
     ray['rho']   =  rho_interp((ray['phi'], ray['theta'], ray['r']))
     ray['kappa'] =  kappa_interp((ray['phi'], ray['theta'], ray['r']))
@@ -102,7 +72,7 @@ def MC_ray(dart):
     tauLOS = np.sum(ray['rho']*ray['kappa']*ray['dl'])
     expfac = np.exp(-tauLOS)
 
-    print('dart (i,y/R_star,z/R_star, az_angle, pol_angle, tau, e(-tau)): ', dart, np.round(ydart,3) , np.round(zdart,3) , np.round(azim_angle,3) ,np.round(pol_angle,3), tauLOS, expfac )
+    print('dart (i,y/R_star,z/R_star, az_angle, tau, e(-tau)): ', dart, np.round(ydart,3) , np.round(zdart,3) , np.round(azim_angle,3), np.round(tauLOS,4), np.round(expfac,4) )
 
     
     return expfac
@@ -113,18 +83,15 @@ parser = argparse.ArgumentParser(
 
 parser.add_argument("--base_dir", type=str,help="data directory (should end with / )")
 parser.add_argument("--snapshot", type=str,help="filename of snapshot to be processed")
-parser.add_argument("--angles", type=float, nargs='+',
-                    help="angles at which to perform the spectral synthesis (radians, mid-transit=0)", required=True)
+parser.add_argument("--N_angles", type=int,
+                    help="angles at which to perform the RT", required=True)
 parser.add_argument("--level", default=None, type=int,
                     help="refinement level to read the snapshot at")
-# parser.add_argument("--N_mc", default=1000, type=int, help="number of MC rays")
-parser.add_argument("--N_radial", default=30, type=int, help="number of radial bins for RT rays")
-parser.add_argument("--f_raystep", default=0.2, type=float,
-                    help="controls num of points along a ray, dl=f_raystep*dplanet")
+parser.add_argument("--N_diameter", default=10, type=int, help="Number of linear spaced rays across diameter")
+parser.add_argument("--N_raypoints", default=10, type=int,
+                    help="controls num of points along a ray")
 parser.add_argument("--scale", default=1.0, type=float, help="scale density and pressure by this factor")
-parser.add_argument("--rstar", default=800*7e10, type=float,
-                    help="stellar radius, usually the inner radius of spherical polar mesh x1min")
-parser.add_argument("--bplanet", default=0.0, type=float, help='impact parameter in stellar radii')
+#parser.add_argument("--bplanet", default=0.0, type=float, help='impact parameter in stellar radii')
 
 args = parser.parse_args()
 base_dir = args.base_dir
@@ -132,58 +99,35 @@ snapshot = args.snapshot
 mylevel = args.level
 # N_mc = args.N_mc
 # nraypoints = args.N_raypoints
-angles = args.angles
+angles = np.linspace(0,2*np.pi,args.N_angles)
 dens_pres_scale = args.scale
-N_radial = args.N_radial
-f_raystep = args.f_raystep
-rad_star = args.rstar
-bplanet = args.bplanet
+N_diameter = args.N_diameter
+N_raypoints = args.N_raypoints 
+#bplanet = args.bplanet
 
 
 ################################################################
 
 
 orb = dw.read_trackfile(base_dir + "pm_trackfile.dat")
-
-################################################################
-
 a = orb['sep'][0]
 
-print(" running RT for: ")
-print("a = ", a)
-print("rstar =", rad_star)
-
-
-################################################################
 
 # NOTE: needs to be a full 3D output, not a slice!!!
 myfile = base_dir + snapshot
-# NOTE: SET THESE 
-out_lim = 2 * a 
-in_lim = 0.5 * a  
-print("computing rays between r (in,out) = ", in_lim, out_lim)
-
 gamma = 5/3.
 
+d = dw.read_data_for_rt(myfile, orb, level=mylevel,gamma=gamma,dens_pres_scale_factor=dens_pres_scale)
+
+# NOTE: SET THESE IF DON'T WANT FULL DOMAIN (could do from 1.5 rstar to 5 rstar, for example)
+rad_star = d['x1v'][0]
+out_lim =  d['x1v'][-1]
+in_lim = rad_star
+print("computing rays between r (in,out) = ", in_lim, out_lim)
+
 # rotation angle to achieve impact parameter b 
-pol_angle = - np.arcsin(bplanet*rad_star / a)
-print("impact parameter b=",bplanet,"rotating by ",pol_angle) 
-
-# NOTE: setting limits for reading the data. These probably can be adjusted
-x1_min = max( in_lim - rad_star, rad_star) 
-x1_max = max( out_lim + rad_star, 1.1*out_lim)
-x2_min = 0.0
-x2_max = np.pi 
-x3_min = 0.0 
-x3_max = 2*np.pi
-
-# If there are bounds errors with rays, check the range of data being read in... 
-print("reading data with limits: \n x1:",x1_min,x1_max,"\n x2/pi:",x2_min/np.pi, x2_max/np.pi,"\n x3/pi:",x3_min/np.pi, x3_max/np.pi,"\n")
-d = dw.read_data_for_rt(myfile, orb, level=mylevel,
-                        x3_min=x3_min, x3_max=x3_max,
-                        x2_min=x2_min, x2_max=x2_max,
-                        x1_min=x1_min,x1_max=x1_max,
-                        gamma=gamma,dens_pres_scale_factor=dens_pres_scale)
+#pol_angle = - np.arcsin(bplanet*rad_star / a)
+#print("impact parameter b=",bplanet,"rotating by ",pol_angle) 
 
 
 t = d['Time']
@@ -198,7 +142,7 @@ dr = np.broadcast_to(d['x1f'][1:] - d['x1f'][0:-1],
                      (len(d['x3v']), len(d['x2v']), len(d['x1v'])))
 
 ################################################################
-# Get interpolating functions #### TO DO: FILL IN
+# Get interpolating functions 
 rho_interp = dw.get_interp_function(d, "rho")
 kappa_interp = dw.get_interp_function(d, "kappa")
 
@@ -207,38 +151,36 @@ kappa_interp = dw.get_interp_function(d, "kappa")
 # ray tracing
 print("ray tracing for", len(angles), "angles =", angles)
 fluxes = np.zeros_like(angles)
-
 aind = 0
+
 for i,aa in enumerate(angles):
     print("#####\n angle=", aa, "######")
     aind += 1
     azim_angle = aa
 
     # get ray positions
-    # yrandom, zrandom = generate_random(N_mc)
-    # weights = np.ones_like(yrandom)
-    # fractional y,z position of the planet within the star for weighted sampling
-    yplanet = np.sin(aa) * a / rad_star
-    zplanet = bplanet
-    
-    # yrandom,zrandom,weights = generate_random_weighted(N_mc,yplanet,zplanet,rp/rad_star)
-    yrandom, zrandom, weights = generate_rays_weighted(N_radial, 1.0, yplanet, zplanet, 0)
+    yrandom, zrandom = generate_uniform(N_diameter)
+    weights = np.ones_like(yrandom)
     N_mc = len(yrandom)
-
-    r_prime_mag = np.sqrt(yrandom * yrandom + zrandom * zrandom)
-
+    
     # calculate stellar intensity profile
+    r_prime_mag = np.sqrt(yrandom * yrandom + zrandom * zrandom)
     m = np.sqrt(1. - r_prime_mag ** 2)
     stellar_intensity = weights * I(m, ld1, ld2)  # Apply the weights!
     total_stellar_intensity = np.sum(stellar_intensity)
     # print "total_stellar_intensity=",total_stellar_intensity
 
+
+
+    ### sum, checking for nan
     total = 0.0
     control = 0.0
-   
+
+    stellar_intensity_attenuated = np.zeros_like(stellar_intensity)
     for dart in range(N_mc):
         # compute the RT
         exp_fac = MC_ray(dart)
+        stellar_intensity_attenuated[dart] = stellar_intensity[dart] * exp_fac
 
         if np.isnan(exp_fac):
             print('nan dart !!!!! ')
@@ -246,6 +188,12 @@ for i,aa in enumerate(angles):
             total    += stellar_intensity[dart] * exp_fac
             control  += stellar_intensity[dart]
 
+
+    # Make a table of rays, save for making images of star
+    ray_table = Table( [yrandom,zrandom,weights,stellar_intensity,stellar_intensity_attenuated], names=['ystar', 'zstar','weight','stellar_intensity','stellar_intensity_attenuated'] )
+    ray_table.write(base_dir + snapshot[0:-6] + "_a" + str(np.round(aa,3))+ ".dat", format = 'ascii',overwrite=True)
+    
+    
     final_intensity = total / N_mc
     final_control = control / N_mc
     print("N_mc= ", N_mc, final_intensity/final_control)
@@ -253,6 +201,7 @@ for i,aa in enumerate(angles):
 
 
     
-## TO DO
 ## save the angle, fluxes arrays as astropy Table
-print( Table([angles,fluxes],names=['angle','flux']) )
+angle_flux_table = Table([angles,fluxes],names=['angle','flux']) 
+angle_flux_table.write(base_dir + snapshot[0:-6] + "_lightcurve.dat", format = 'ascii',overwrite=True)
+print(angle_flux_table)
