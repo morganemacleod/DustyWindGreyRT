@@ -2,9 +2,11 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
+import Constants
 import dusty_wind_utils as dw
+from astropy.table import Table
 
-c=Constants()
+c=Constants.Constants()
 
 # Quadratic LD coeff V band http://cdsarc.u-strasbg.fr/viz-bin/qcat?J/A+A/554/A98#/browse
 # http://cdsarc.u-strasbg.fr/ftp/J/A+A/554/A98/ReadMe
@@ -83,15 +85,13 @@ def MC_ray(dart):
     """ computes sum of tau along LOS of a ray defined by integer 'dart' """
     ydart = yrandom[dart]
     zdart = zrandom[dart]
-    print('dart (i,y/R_star,z/R_star, az_angle, pol_angle): ', dart, np.round(ydart,3) , np.round(zdart,3) , np.round(azim_angle,3) ,np.round(pol_angle,3) )
-
+    
     ray = dw.get_ray(planet_pos=(x2, y2, z2),
                      ydart=ydart,
                      zdart=zdart,
                      azim_angle=azim_angle,
                      pol_angle=pol_angle, 
                      rstar=rad_star,
-                     rplanet=rp,
                      fstep=f_raystep,
                      inner_lim=in_lim,
                      outer_lim=out_lim)
@@ -102,24 +102,27 @@ def MC_ray(dart):
     tauLOS = np.sum(ray['rho']*ray['kappa']*ray['dl'])
     expfac = np.exp(-tauLOS)
 
+    print('dart (i,y/R_star,z/R_star, az_angle, pol_angle, tau, e(-tau)): ', dart, np.round(ydart,3) , np.round(zdart,3) , np.round(azim_angle,3) ,np.round(pol_angle,3), tauLOS, expfac )
+
+    
     return expfac
 
 
 parser = argparse.ArgumentParser(
     description='Read input/output directories, MC ray properties, example usage: "python BG_RT.py --base_dir ~/Dropbox/PlanetWind/Analysis/testdata/ --snapshot PW_W107.out1.00100.athdf --level 1 --N_mc 100 --N_raypoints 200 --angles 0" ')
 
-parser.add_argument("--base_dir", help="data directory (should end with / )")
-parser.add_argument("--snapshot", help="filename of snapshot to be processed")
+parser.add_argument("--base_dir", type=str,help="data directory (should end with / )")
+parser.add_argument("--snapshot", type=str,help="filename of snapshot to be processed")
 parser.add_argument("--angles", type=float, nargs='+',
                     help="angles at which to perform the spectral synthesis (radians, mid-transit=0)", required=True)
-parser.add_argument("--level", default=1, type=int,
+parser.add_argument("--level", default=None, type=int,
                     help="refinement level to read the snapshot at")
 # parser.add_argument("--N_mc", default=1000, type=int, help="number of MC rays")
 parser.add_argument("--N_radial", default=30, type=int, help="number of radial bins for RT rays")
 parser.add_argument("--f_raystep", default=0.2, type=float,
                     help="controls num of points along a ray, dl=f_raystep*dplanet")
 parser.add_argument("--scale", default=1.0, type=float, help="scale density and pressure by this factor")
-parser.add_argument("--rstar", default=4.67e10, type=float,
+parser.add_argument("--rstar", default=800*7e10, type=float,
                     help="stellar radius, usually the inner radius of spherical polar mesh x1min")
 parser.add_argument("--bplanet", default=0.0, type=float, help='impact parameter in stellar radii')
 
@@ -144,8 +147,6 @@ orb = dw.read_trackfile(base_dir + "pm_trackfile.dat")
 
 ################################################################
 
-m1 = orb['m1'][0]
-m2 = orb['m2'][0]
 a = orb['sep'][0]
 
 print(" running RT for: ")
@@ -168,16 +169,13 @@ gamma = 5/3.
 pol_angle = - np.arcsin(bplanet*rad_star / a)
 print("impact parameter b=",bplanet,"rotating by ",pol_angle) 
 
-# NOTE: setting limits for reading the data. These probably could be adjusted but are meant to err on the side of capturing everything. 
+# NOTE: setting limits for reading the data. These probably can be adjusted
 x1_min = max( in_lim - rad_star, rad_star) 
 x1_max = max( out_lim + rad_star, 1.1*out_lim)
-inner_pol_angle = np.arcsin(rad_star/in_lim)
-theta_require = 1.01*np.sin(rad_star/x1_min) / np.cos(np.abs(inner_pol_angle) + np.abs(pol_angle))
-print("require an angle of", theta_require/np.pi, "pi to capture stellar radius at inner limit of grid")
-x2_min = max(0.0,np.pi/2 - theta_require + pol_angle)
-x2_max = min(np.pi,np.pi/2 + theta_require + pol_angle)
-x3_min = max(0.0,np.pi + np.min(angles) - theta_require)
-x3_max = min(2*np.pi,np.pi + np.max(angles) + theta_require)
+x2_min = 0.0
+x2_max = np.pi 
+x3_min = 0.0 
+x3_max = 2*np.pi
 
 # If there are bounds errors with rays, check the range of data being read in... 
 print("reading data with limits: \n x1:",x1_min,x1_max,"\n x2/pi:",x2_min/np.pi, x2_max/np.pi,"\n x3/pi:",x3_min/np.pi, x3_max/np.pi,"\n")
@@ -189,22 +187,15 @@ d = dw.read_data_for_rt(myfile, orb, level=mylevel,
 
 
 t = d['Time']
-rcom, vcom = dw.rcom_vcom(orb, t)
 x2, y2, z2 = dw.pos_secondary(orb, t)
 print('Time:', t)
 print('Position of secondary: ', x2, y2, z2)
-print('time to read file:', time.time() - start_read_time)
+
 
 d2 = np.sqrt((d['x'] - x2) ** 2 + (d['y'] - y2) ** 2 + (d['z'] - z2) ** 2)
 
 dr = np.broadcast_to(d['x1f'][1:] - d['x1f'][0:-1],
                      (len(d['x3v']), len(d['x2v']), len(d['x1v'])))
-
-
-#################################################################
-# Convert rotating -> Inertial frame
-d['vx'] = d['vx'] - Omega_orb * d['y']
-d['vy'] = d['vy'] + Omega_orb * d['x']
 
 ################################################################
 # Get interpolating functions #### TO DO: FILL IN
@@ -221,7 +212,7 @@ aind = 0
 for i,aa in enumerate(angles):
     print("#####\n angle=", aa, "######")
     aind += 1
-    azim_angle = aa + np.pi
+    azim_angle = aa
 
     # get ray positions
     # yrandom, zrandom = generate_random(N_mc)
@@ -231,7 +222,7 @@ for i,aa in enumerate(angles):
     zplanet = bplanet
     
     # yrandom,zrandom,weights = generate_random_weighted(N_mc,yplanet,zplanet,rp/rad_star)
-    yrandom, zrandom, weights = generate_rays_weighted(N_radial, 0.75, yplanet, zplanet, rp / rad_star)
+    yrandom, zrandom, weights = generate_rays_weighted(N_radial, 1.0, yplanet, zplanet, 0)
     N_mc = len(yrandom)
 
     r_prime_mag = np.sqrt(yrandom * yrandom + zrandom * zrandom)
@@ -249,7 +240,7 @@ for i,aa in enumerate(angles):
         # compute the RT
         exp_fac = MC_ray(dart)
 
-        if np.isnan(np.sum(exp_fac)) or np.isinf(-np.log(exp_fac[int(len(nu) / 2)])):
+        if np.isnan(exp_fac):
             print('nan dart !!!!! ')
         else:
             total    += stellar_intensity[dart] * exp_fac
@@ -261,5 +252,7 @@ for i,aa in enumerate(angles):
     fluxes[i] = final_intensity/final_control
 
 
+    
 ## TO DO
 ## save the angle, fluxes arrays as astropy Table
+print( Table([angles,fluxes],names=['angle','flux']) )

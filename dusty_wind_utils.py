@@ -5,101 +5,20 @@ import athena_read as ar
 def read_trackfile(fn,m1=0,m2=0):
     orb=ascii.read(fn)
     print( "reading orbit file for dusty wind simulation...")
-
+    
+    if 'x2' in orb.colnames:
+        orb['x'] = orb['x2']
+        orb['y'] = orb['y2']
+        orb['z'] = orb['z2']
+        orb['vx'] = orb['vx2']
+        orb['vy'] = orb['vy2']
+        orb['vz'] = orb['vz2']
+    
     orb['sep'] = np.sqrt(orb['x']**2 + orb['y']**2 + orb['z']**2)
 
-    orb['r'] = np.array([orb['x'],orb['y'],orb['z']]).T
-    orb['rhat'] = np.array([orb['x']/orb['sep'],orb['y']/orb['sep'],orb['z']/orb['sep']]).T
-
-    orb['v'] = np.array([orb['vx'],orb['vy'],orb['vz']]).T
-    orb['vmag'] = np.linalg.norm(orb['v'],axis=1)
-    orb['vhat'] = np.array([orb['vx']/orb['vmag'],orb['vy']/orb['vmag'],orb['vz']/orb['vmag']]).T
-
-    orb['xcom'] = m2*orb['x']/(m1+m2)
-    orb['ycom'] = m2*orb['y']/(m1+m2)
-    orb['zcom'] = m2*orb['z']/(m1+m2)
-    
-    orb['vxcom'] = m2*orb['vx']/(m1+m2)
-    orb['vycom'] = m2*orb['vy']/(m1+m2)
-    orb['vzcom'] = m2*orb['vz']/(m1+m2)
-    
-    orb['rcom'] = np.array([orb['xcom'],orb['ycom'],orb['zcom']]).T
-    orb['vcom'] = np.array([orb['vxcom'],orb['vycom'],orb['vzcom']]).T
-    
     return orb
 
 
-def read_data(fn,orb,
-              m1=0,m2=0,rsoft2=0.1,level=0,
-              get_cartesian=True,get_cartesian_vel=True,
-             x1_min=None,x1_max=None,
-             x2_min=None,x2_max=None,
-             x3_min=None,x3_max=None,
-              gamma=5./3.,
-              pole_dir=2,
-              dens_pres_scale_factor=1.0):
-    """ Read spherical data and reconstruct cartesian mesh for analysis/plotting """
-    
-    print("read_data...reading file",fn)
-    
-    
-    d = ar.athdf(fn,level=level,subsample=True,
-                 x1_min=x1_min,x1_max=x1_max,
-                 x2_min=x2_min,x2_max=x2_max,
-                 x3_min=x3_min,x3_max=x3_max) # approximate arrays by subsampling if level < max
-    print(" ...file read, constructing arrays")
-    print(" ...gamma=",gamma)
-
-    # SCALE DENSITY AND PRESSURE
-    d['rho'] = dens_pres_scale_factor*d['rho']
-    d['press'] = dens_pres_scale_factor*d['press']
-
-    
-    # current time
-    t = d['Time']
-    # get properties of orbit
-    rcom,vcom = rcom_vcom(orb,t)
-
-    if m1==0:
-        m1 = np.interp(t,orb['time'],orb['m1'])
-    if m2==0:
-        m2 = np.interp(t,orb['time'],orb['m2'])
-
-    data_shape = (len(d['x3v']),len(d['x2v']),len(d['x1v']))
-   
-    d['gx1v']=np.broadcast_to(d['x1v'],(len(d['x3v']),len(d['x2v']),len(d['x1v'])) )
-    d['gx2v']=np.swapaxes(np.broadcast_to(d['x2v'],(len(d['x3v']),len(d['x1v']),len(d['x2v'])) ),1,2)
-    d['gx3v']=np.swapaxes(np.broadcast_to(d['x3v'],(len(d['x1v']),len(d['x2v']),len(d['x3v'])) ) ,0,2 )
-    
-    ####
-    # GET THE VOLUME 
-    ####
-    
-    ## dr, dth, dph
-    d1 = d['x1f'][1:] - d['x1f'][:-1]
-    d2 = d['x2f'][1:] - d['x2f'][:-1]
-    d3 = d['x3f'][1:] - d['x3f'][:-1]
-    
-    gd1=np.broadcast_to(d1,(len(d['x3v']),len(d['x2v']),len(d['x1v'])) )
-    gd2=np.swapaxes(np.broadcast_to(d2,(len(d['x3v']),len(d['x1v']),len(d['x2v'])) ),1,2)
-    gd3=np.swapaxes(np.broadcast_to(d3,(len(d['x1v']),len(d['x2v']),len(d['x3v'])) ) ,0,2 )
-    
-    
-    # AREA / VOLUME 
-    sin_th = np.sin(d['gx2v'])
-    d['dA'] = d['gx1v']**2 * sin_th * gd2*gd3
-    d['dvol'] = d['dA'] * gd1
-    
-    # free up d1,d2,d3
-    del d1,d2,d3
-    del gd1,gd2,gd3
-    
-    
-    ### 
-    # CARTESIAN VALUES
-    ###
-    if(get_cartesian or get_torque or get_energy):
-        print("...getting cartesian arrays...")
 
 
 def read_data_for_rt(fn,orb,rsoft2=0.1,level=0,
@@ -119,7 +38,7 @@ def read_data_for_rt(fn,orb,rsoft2=0.1,level=0,
                  x1_min=x1_min,x1_max=x1_max,
                  x2_min=x2_min,x2_max=x2_max,
                  x3_min=x3_min,x3_max=x3_max,
-                 quantities=['rho','press','vel1','vel2','vel3','r0']) # approximate arrays by subsampling if level < max
+                 quantities=['rho','press','vel1','vel2','vel3']) # approximate arrays by subsampling if level < max
     print(" ...file read, constructing arrays")
     print(" ...gamma=",gamma)
 
@@ -127,18 +46,7 @@ def read_data_for_rt(fn,orb,rsoft2=0.1,level=0,
     d['rho'] = dens_pres_scale_factor*d['rho']
     d['press'] = dens_pres_scale_factor*d['press']
 
-    # current time
-    t = d['Time']
-    # get properties of orbit
-    rcom,vcom = rcom_vcom(orb,t)
 
-    if m1==0:
-        m1 = np.interp(t,orb['time'],orb['m1'])
-    if m2==0:
-        m2 = np.interp(t,orb['time'],orb['m2'])
-
-    #data_shape = (len(d['x3v']),len(d['x2v']),len(d['x1v']))
-   
     d['gx1v']=np.broadcast_to(d['x1v'],(len(d['x3v']),len(d['x2v']),len(d['x1v'])) )
     d['gx2v']=np.swapaxes(np.broadcast_to(d['x2v'],(len(d['x3v']),len(d['x1v']),len(d['x2v'])) ),1,2)
     d['gx3v']=np.swapaxes(np.broadcast_to(d['x3v'],(len(d['x1v']),len(d['x2v']),len(d['x3v'])) ) ,0,2 )
@@ -259,7 +167,7 @@ def cart_to_polar(x,y,z):
     return phi,th,r
 
 
-def get_ray(planet_pos, ydart, zdart, azim_angle, pol_angle, rstar, rplanet, fstep, inner_lim, outer_lim):
+def get_ray(planet_pos, ydart, zdart, azim_angle, pol_angle, rstar, fstep, inner_lim, outer_lim):
 
     #print("get ray called with the following params:\n",
     #          "y =",ydart, " z=", zdart,"\n",
@@ -279,10 +187,10 @@ def get_ray(planet_pos, ydart, zdart, azim_angle, pol_angle, rstar, rplanet, fst
 
 
     # define origin
-    print(" ... ray rotation, az,pol: ", azim_angle, pol_angle)
+    #print(" ... ray rotation, az,pol: ", azim_angle, pol_angle)
     origin = np.matmul( dart1, rotz)
     origin = np.matmul( origin, rotY)
-    print(" ... ray origin = ", origin)
+    #print(" ... ray origin = ", origin)
    
     # ray 
     ray={}
@@ -313,6 +221,6 @@ def get_ray(planet_pos, ydart, zdart, azim_angle, pol_angle, rstar, rplanet, fst
     ray['phi'],ray['theta'],ray['r'] = cart_to_polar(ray['x'],ray['y'],ray['z'])
 
     #print(" ... ray has l=",ray['l'][0],ray['l'][-1])
-    print(" ... ray has ",len(ray['r']),"points, between r=",ray['r'][0],ray['r'][-1], " th/pi=",ray['theta'][0]/np.pi,ray['theta'][-1]/np.pi, " phi/pi=",ray['phi'][0]/np.pi,ray['phi'][-1]/np.pi )
+    #print(" ... ray has ",len(ray['r']),"points, between r=",ray['r'][0],ray['r'][-1], " th/pi=",ray['theta'][0]/np.pi,ray['theta'][-1]/np.pi, " phi/pi=",ray['phi'][0]/np.pi,ray['phi'][-1]/np.pi )
     
     return ray
