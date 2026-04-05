@@ -19,3 +19,9 @@ plt.scatter(rt['ystar'],rt['zstar'],c=rt['stellar_intensity_attenuated'])
 plt.axis('equal')
 plt.colorbar()
 </code>
+
+and we can plot the light curve as (note double check sign on angle/time):
+<code>
+lc = Table.read("binary_wind.prim.00053_lightcurve.dat",format='ascii')
+plt.plot(lc['angle']/2*np.pi,lc['flux'])
+</code>
