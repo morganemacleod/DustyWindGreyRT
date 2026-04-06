@@ -2,6 +2,9 @@ import numpy as np
 from astropy.io import ascii
 import athena_read as ar
 
+kBoltz  = 1.380658e-16  # erg/K
+mH      = 1.6733e-24    # g
+
 def read_trackfile(fn,m1=0,m2=0):
     orb=ascii.read(fn)
     print( "reading orbit file for dusty wind simulation...")
@@ -19,7 +22,27 @@ def read_trackfile(fn,m1=0,m2=0):
     return orb
 
 
+def rosseland_opacity(rho, T, X=0.7, Z=0.014):
+    rho_c = np.maximum(rho, 1e-30)
+    T_c   = np.maximum(T,   1.0)
 
+    Ke = 0.2*(1.0+X) / ((1.0 + 2.7e11*rho_c/(T_c*T_c)) * (1.0 + (T_c/4.5e8)**0.86))
+    Kk = 4.e25*(1.0+X)*(Z+1.e-3)*rho_c*T_c**(-3.5)
+    Khm = 1.1e-25*np.sqrt(np.maximum(Z,0.0))*np.sqrt(rho_c)*T_c**(7.7)
+    Km  = 0.1*Z
+
+    fdust = Z*0.1*(1.0 - np.tanh((T_c-1400.0)/150.0))
+    Kd    = fdust*1000.0
+
+    Khm_eff = np.maximum(Khm, 1e-60)
+    Kff_eff = np.maximum(Ke+Kk, 1e-60)
+    Kmix    = 1.0/(1.0/Khm_eff + 1.0/Kff_eff)
+
+    Krad = Kd + Km + Kmix
+    return np.maximum(Krad, 0.0)
+
+def temperature_from_prho(press, rho, mu):
+    return press * mu * mH / (np.maximum(rho, 1e-30) * kBoltz)
 
 def read_and_rotate_data_for_rt(fn,orb,rsoft2=0.1,level=0,
                                 get_cartesian=True,get_cartesian_vel=True,
@@ -90,7 +113,8 @@ def read_and_rotate_data_for_rt(fn,orb,rsoft2=0.1,level=0,
 
 
     ## FILL IN:
-    d['kappa'] = 1e-3*np.ones_like(d['rho'])
+    T = temperature_from_prho(d['press'], d['rho'], .61)
+    d['kappa'] = rosseland_opacity(d['rho'],T)
     
     return d
 
