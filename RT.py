@@ -5,6 +5,7 @@ from scipy.interpolate import RegularGridInterpolator
 import Constants
 import dusty_wind_utils as dw
 from astropy.table import Table
+from glob import glob
 
 c=Constants.Constants()
 
@@ -19,17 +20,6 @@ ld2 = -0.2080
 def I(mu, ld1, ld2):
     return np.where(mu == 0.0, 0.0, (1. - ld1 * (1. - mu) - ld2 * (1. - mu) ** 2))
 
-def New_get_interp_function(d, var):
-    dph = np.gradient(d['x3v'])[0]
-    x3v = np.append(d['x3v'][0] - dph, d['x3v'])
-    x3v = np.append(x3v, x3v[-1] + dph)
-
-    var_data = np.append([var[-1]], var, axis=0)
-    var_data = np.append(var_data, [var_data[0]], axis=0)
-
-    var_interp = RegularGridInterpolator(
-        (x3v, d['x2v'], d['x1v']), var_data, bounds_error=True)
-    return var_interp
 
 def generate_uniform(N_diameter):
     y = np.linspace(-1,1,N_diameter)
@@ -40,31 +30,20 @@ def generate_uniform(N_diameter):
     return y_circle, z_circle
     
 
-def generate_random(N_mc):
-    theta = 2 * np.pi * np.random.random_sample(N_mc)
-    r = np.sqrt(np.random.random_sample(N_mc))
-
-    yrandom = r * np.cos(theta)
-    zrandom = r * np.sin(theta)
-
-    return yrandom, zrandom
-
-
 
 def MC_ray(dart):
     """ computes sum of tau along LOS of a ray defined by integer 'dart' """
     ydart = yrandom[dart]
     zdart = zrandom[dart]
     
-    ray = dw.get_ray(planet_pos=(x2, y2, z2),
-                     ydart=ydart,
+    ray = dw.get_ray(ydart=ydart,
                      zdart=zdart,
-                     azim_angle=azim_angle,
-                     #pol_angle=pol_angle, 
                      rstar=rad_star,
                      inner_lim=in_lim,
                      outer_lim=out_lim,
-                     N_raypoints=N_raypoints)
+                     N_raypoints=N_raypoints,
+                     azim_angle=azim_angle,
+                     pol_angle=pol_angle)
 
     ray['rho']   =  rho_interp((ray['phi'], ray['theta'], ray['r']))
     ray['kappa'] =  kappa_interp((ray['phi'], ray['theta'], ray['r']))
@@ -82,82 +61,75 @@ parser = argparse.ArgumentParser(
     description='Read input/output directories, MC ray properties, example usage: "python BG_RT.py --base_dir ~/Dropbox/PlanetWind/Analysis/testdata/ --snapshot PW_W107.out1.00100.athdf --level 1 --N_mc 100 --N_raypoints 200 --angles 0" ')
 
 parser.add_argument("--base_dir", type=str,help="data directory (should end with / )")
-parser.add_argument("--snapshot", type=str,help="filename of snapshot to be processed")
-parser.add_argument("--N_angles", type=int,
-                    help="angles at which to perform the RT", required=True)
+parser.add_argument("--snapshot_filename", type=str,help="example filename of snapshot to be processed")
+parser.add_argument("--snapshot_start", type=int,default=0,help="snapshot number to start processing")
+parser.add_argument("--snapshot_end", type=int,default=-1,help="snapshot number to end processing")
+parser.add_argument("--snapshot_skip", type=int,default=1,help="process every __ snapshot")
 parser.add_argument("--level", default=None, type=int,
                     help="refinement level to read the snapshot at")
 parser.add_argument("--N_diameter", default=10, type=int, help="Number of linear spaced rays across diameter")
 parser.add_argument("--N_raypoints", default=10, type=int,
                     help="controls num of points along a ray")
 parser.add_argument("--scale", default=1.0, type=float, help="scale density and pressure by this factor")
-#parser.add_argument("--bplanet", default=0.0, type=float, help='impact parameter in stellar radii')
+parser.add_argument("--pol_angle", default=0.0, type=float, help='angle to rotate the snapshot from equator radians, +/- pi/2')
+parser.add_argument("--azim_angle",default=0.0,type=float,help='angle to view the snapshot from, radian, 0-2pi')
 
 args = parser.parse_args()
 base_dir = args.base_dir
-snapshot = args.snapshot
+snapshot_filename = args.snapshot_filename
+snapshot_start = args.snapshot_start
+snapshot_end   = args.snapshot_end
+snapshot_skip  = args.snapshot_skip
 mylevel = args.level
-# N_mc = args.N_mc
-# nraypoints = args.N_raypoints
-angles = np.linspace(0,2*np.pi,args.N_angles)
 dens_pres_scale = args.scale
 N_diameter = args.N_diameter
-N_raypoints = args.N_raypoints 
-#bplanet = args.bplanet
-
+N_raypoints = args.N_raypoints +1 
+azim_angle=args.azim_angle
+pol_angle =args.pol_angle
 
 ################################################################
 
+print("STARTING RT:\n args:\n",args)
 
+
+
+
+print("processing RT from (azim,pol) viewing angle:",(azim_angle,pol_angle))
+
+    
 orb = dw.read_trackfile(base_dir + "pm_trackfile.dat")
 a = orb['sep'][0]
 
 
 # NOTE: needs to be a full 3D output, not a slice!!!
-myfile = base_dir + snapshot
+myfile = base_dir + snapshot_filename
 gamma = 5/3.
 
-d = dw.read_data_for_rt(myfile, orb, level=mylevel,gamma=gamma,dens_pres_scale_factor=dens_pres_scale)
-
-# NOTE: SET THESE IF DON'T WANT FULL DOMAIN (could do from 1.5 rstar to 5 rstar, for example)
-rad_star = d['x1v'][0]
-out_lim =  d['x1v'][-1]
-in_lim = rad_star
-print("computing rays between r (in,out) = ", in_lim, out_lim)
-
-# rotation angle to achieve impact parameter b 
-#pol_angle = - np.arcsin(bplanet*rad_star / a)
-#print("impact parameter b=",bplanet,"rotating by ",pol_angle) 
+filelist = sorted(glob(myfile[0:-11]+'*'+myfile[-6:]))
+print("processing the following filelist:\n",filelist)
 
 
-t = d['Time']
-x2, y2, z2 = dw.pos_secondary(orb, t)
-print('Time:', t)
-print('Position of secondary: ', x2, y2, z2)
+### START LOOP OVER FILES
+times =  np.zeros_like(filelist)
+fluxes = np.zeros_like(filelist)
+for i,fn in enumerate(filelist):
 
+    d = dw.read_and_rotate_data_for_rt(myfile, orb, level=mylevel,gamma=gamma,dens_pres_scale_factor=dens_pres_scale,
+                                       azim_angle=azim_angle,pol_angle=pol_angle)
 
-d2 = np.sqrt((d['x'] - x2) ** 2 + (d['y'] - y2) ** 2 + (d['z'] - z2) ** 2)
+    # NOTE: SET THESE IF DON'T WANT FULL DOMAIN (could do from 1.5 rstar to 5 rstar, for example)
+    rad_star = d['x1v'][0]
+    out_lim =  d['x1v'][-1]
+    in_lim = rad_star
+    print("computing rays between r (in,out) = ", in_lim, out_lim)
 
-dr = np.broadcast_to(d['x1f'][1:] - d['x1f'][0:-1],
-                     (len(d['x3v']), len(d['x2v']), len(d['x1v'])))
+    t = d['Time'] 
 
-################################################################
-# Get interpolating functions 
-rho_interp = dw.get_interp_function(d, "rho")
-kappa_interp = dw.get_interp_function(d, "kappa")
+    # Get interpolating functions 
+    rho_interp = dw.get_interp_function(d, "rho")
+    kappa_interp = dw.get_interp_function(d, "kappa")
 
-###############################################################
-
-# ray tracing
-print("ray tracing for", len(angles), "angles =", angles)
-fluxes = np.zeros_like(angles)
-aind = 0
-
-for i,aa in enumerate(angles):
-    print("#####\n angle=", aa, "######")
-    aind += 1
-    azim_angle = aa
-
+    # Ray Tracing
     # get ray positions
     yrandom, zrandom = generate_uniform(N_diameter)
     weights = np.ones_like(yrandom)
@@ -168,9 +140,6 @@ for i,aa in enumerate(angles):
     m = np.sqrt(1. - r_prime_mag ** 2)
     stellar_intensity = weights * I(m, ld1, ld2)  # Apply the weights!
     total_stellar_intensity = np.sum(stellar_intensity)
-    # print "total_stellar_intensity=",total_stellar_intensity
-
-
 
     ### sum, checking for nan
     total = 0.0
@@ -191,17 +160,19 @@ for i,aa in enumerate(angles):
 
     # Make a table of rays, save for making images of star
     ray_table = Table( [yrandom,zrandom,weights,stellar_intensity,stellar_intensity_attenuated], names=['ystar', 'zstar','weight','stellar_intensity','stellar_intensity_attenuated'] )
-    ray_table.write(base_dir + snapshot[0:-6] + "_a" + str(np.round(aa,3))+ ".dat", format = 'ascii',overwrite=True)
+    ray_table.write(fn[0:-6] + "_rt.dat", format = 'ascii',overwrite=True)
     
     
     final_intensity = total / N_mc
     final_control = control / N_mc
     print("N_mc= ", N_mc, final_intensity/final_control)
+    times[i] = t
     fluxes[i] = final_intensity/final_control
 
-
+        
+### END LOOP OVER FILES
     
 ## save the angle, fluxes arrays as astropy Table
-angle_flux_table = Table([angles,fluxes],names=['angle','flux']) 
-angle_flux_table.write(base_dir + snapshot[0:-6] + "_lightcurve.dat", format = 'ascii',overwrite=True)
-print(angle_flux_table)
+lc_flux_table = Table([times,fluxes],names=['times','flux']) 
+lc_flux_table.write(fn[0:-12] + "_lightcurve.dat", format = 'ascii',overwrite=True)
+print(lc_flux_table)

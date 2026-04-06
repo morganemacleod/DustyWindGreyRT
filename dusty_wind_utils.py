@@ -21,14 +21,16 @@ def read_trackfile(fn,m1=0,m2=0):
 
 
 
-def read_data_for_rt(fn,orb,rsoft2=0.1,level=0,
-              get_cartesian=True,get_cartesian_vel=True,
-              x1_min=None,x1_max=None,
-              x2_min=None,x2_max=None,
-              x3_min=None,x3_max=None,
-              gamma=5./3.,
-             pole_dir=2,
-             dens_pres_scale_factor=1.0):
+def read_and_rotate_data_for_rt(fn,orb,rsoft2=0.1,level=0,
+                                get_cartesian=True,get_cartesian_vel=True,
+                                x1_min=None,x1_max=None,
+                                x2_min=None,x2_max=None,
+                                x3_min=None,x3_max=None,
+                                gamma=5./3.,
+                                pole_dir=2,
+                                dens_pres_scale_factor=1.0,
+                                azim_angle=0.0,pol_angle=0.0
+                                ):
     """ Read spherical data and reconstruct cartesian mesh for analysis/plotting """
     
     print("read_data...reading file",fn)
@@ -42,6 +44,17 @@ def read_data_for_rt(fn,orb,rsoft2=0.1,level=0,
     print(" ...file read, constructing arrays")
     print(" ...gamma=",gamma)
 
+    # rotate in azim_angle
+    if azim_angle < 0:
+        print("ERROR: azim angle should be positive!!")
+        exit()
+    d['x3v'] = d['x3v']-azim_angle  #np.where(d['x3v']-azim_angle<0, d['x3v']-azim_angle + 2*np.pi, d['x3v']-azim_angle)
+
+    # rotate in pol_angle
+    if pol_angle != 0:
+        print("ERROR: pol_angle other than zero not implimented yet!")
+        exit()
+    
     # SCALE DENSITY AND PRESSURE
     d['rho'] = dens_pres_scale_factor*d['rho']
     d['press'] = dens_pres_scale_factor*d['press']
@@ -50,30 +63,8 @@ def read_data_for_rt(fn,orb,rsoft2=0.1,level=0,
     d['gx1v']=np.broadcast_to(d['x1v'],(len(d['x3v']),len(d['x2v']),len(d['x1v'])) )
     d['gx2v']=np.swapaxes(np.broadcast_to(d['x2v'],(len(d['x3v']),len(d['x1v']),len(d['x2v'])) ),1,2)
     d['gx3v']=np.swapaxes(np.broadcast_to(d['x3v'],(len(d['x1v']),len(d['x2v']),len(d['x3v'])) ) ,0,2 )
-    
-    ####
-    # GET THE VOLUME 
-    ####
-    
-    ## dr, dth, dph
-    #d1 = d['x1f'][1:] - d['x1f'][:-1]
-    #d2 = d['x2f'][1:] - d['x2f'][:-1]
-    #d3 = d['x3f'][1:] - d['x3f'][:-1]
-    
-    #gd1=np.broadcast_to(d1,(len(d['x3v']),len(d['x2v']),len(d['x1v'])) )
-    #gd2=np.swapaxes(np.broadcast_to(d2,(len(d['x3v']),len(d['x1v']),len(d['x2v'])) ),1,2)
-    #gd3=np.swapaxes(np.broadcast_to(d3,(len(d['x1v']),len(d['x2v']),len(d['x3v'])) ) ,0,2 )
-    
-    
+
     # AREA / VOLUME 
-    sin_th = np.sin(d['gx2v'])
-    #d['dA'] = d['gx1v']**2 * sin_th * gd2*gd3
-    #d['dvol'] = d['dA'] * gd1
-    
-    # free up d1,d2,d3
-    #del d1,d2,d3
-    #del gd1,gd2,gd3
-    
     
     ### 
     # CARTESIAN VALUES
@@ -81,6 +72,7 @@ def read_data_for_rt(fn,orb,rsoft2=0.1,level=0,
     if(get_cartesian or get_torque or get_energy):
         print("...getting cartesian arrays...")
         # angles
+        sin_th = np.sin(d['gx2v'])
         cos_th = np.cos(d['gx2v'])
         sin_ph = np.sin(d['gx3v'])
         cos_ph = np.cos(d['gx3v'])
@@ -92,14 +84,7 @@ def read_data_for_rt(fn,orb,rsoft2=0.1,level=0,
             d['y'] = d['gx1v'] * sin_th * sin_ph 
             d['z'] = d['gx1v'] * cos_th
       
-        if(get_cartesian_vel):
-            # cartesian velocities
-            if(pole_dir==2):
-                d['vx'] = sin_th*cos_ph*d['vel1'] + cos_th*cos_ph*d['vel2'] - sin_ph*d['vel3'] 
-                d['vy'] = sin_th*sin_ph*d['vel1'] + cos_th*sin_ph*d['vel2'] + cos_ph*d['vel3'] 
-                d['vz'] = cos_th*d['vel1'] - sin_th*d['vel2']  
-
-            
+                
         del d['vel1'],d['vel2'],d['vel3']    
         del cos_th, sin_th, cos_ph, sin_ph
 
@@ -159,11 +144,11 @@ def get_interp_function(d,var):
 
 
 
-def cart_to_polar(x,y,z):
+def cart_to_polar_shifted(x,y,z,azim_angle,pol_angle):
     """ returns phi in range 0-2pi"""
     r = np.sqrt(x**2 + y**2 +z**2)
     th = np.arccos(z/r)
-    phi=np.where(np.arctan2(y,x)<0,np.arctan2(y,x) + 2.0*np.pi, np.arctan2(y,x) )
+    phi=np.where(np.arctan2(y,x)<-azim_angle,np.arctan2(y,x) + 2.0*np.pi, np.arctan2(y,x) )
     return phi,th,r
 
 def polar_to_cart(ph,th,r):
@@ -173,46 +158,25 @@ def polar_to_cart(ph,th,r):
     return x,y,z
 
 
-def get_ray(planet_pos, ydart, zdart, azim_angle, rstar, inner_lim, outer_lim, N_raypoints):
-
-    pol_angle = 0.0
-    #print("get ray called with the following params:\n",
-    #          "y =",ydart, " z=", zdart,"\n",
-    #          "az_angle =",azim_angle,"pol_angle=",pol_angle,"\n",
-    #          "rstar =",rstar,"inner_lim=",inner_lim,"outer_lim=",outer_lim)
+def get_ray(ydart, zdart, rstar, inner_lim, outer_lim, N_raypoints,azim_angle,pol_angle):
 
     xdart = np.sqrt(1.0 - ydart**2 - zdart**2)
     origin = np.array([xdart, ydart, zdart])*rstar
     
-    rotZ = np.array([[np.cos(-azim_angle),-np.sin(-azim_angle),0.0],
-                     [np.sin(-azim_angle),np.cos(-azim_angle),0.0],
-                     [0.0,0.0,1.0]])
-    
 
-    # define origin
-
-    origin = np.matmul( origin, rotZ)
-    #print(" ... ray origin (x,y,z) = ", origin)
-    #print(" ... ray origin (ph,th,r)=", cart_to_polar(origin[0],origin[1],origin[2]))
-    
-    
-    # ray 
+    # ray points along +x direction
     ray={}
 
-    #points = np.logspace(np.log10(inner_lim),np.log10(outer_lim),N_raypoints)-rstar
-    points = np.linspace(inner_lim,outer_lim,N_raypoints) - rstar
+    points = np.linspace(xdart,(outer_lim-inner_lim+xdart),N_raypoints)
     ray['dl'] = points[1:]-points[0:-1]
     ray['l'] = 0.5*(points[1:]+points[0:-1])
-    #print(' ... points:',points,'\nl:',ray['l'])
-    ray['x'] = ray['l']*np.cos(azim_angle)*np.cos(pol_angle) + origin[0] 
-    ray['y'] = ray['l']*np.sin(azim_angle)*np.cos(pol_angle) + origin[1]
-    ray['z'] = ray['l']*np.sin(pol_angle) + origin[2]
+    ray['x'] = origin[0] + ray['l']  
+    ray['y'] = origin[1] + np.zeros_like(ray['l']) 
+    ray['z'] = origin[2] + np.zeros_like(ray['l']) 
     #print("ray faces = ",points)
    
-    
-    
     # spherical polar
-    ray['phi'],ray['theta'],ray['r'] = cart_to_polar(ray['x'],ray['y'],ray['z'])
+    ray['phi'],ray['theta'],ray['r'] = cart_to_polar_shifted(ray['x'],ray['y'],ray['z'],azim_angle,pol_angle)
     #print (" ... ray:\n","x:",ray['x'],"\ny:",ray['y'],"\nz:",ray['z'],"\nr:",ray['r'] )
 
     #print(" ... ray has l=",ray['l'][0],ray['l'][-1])
